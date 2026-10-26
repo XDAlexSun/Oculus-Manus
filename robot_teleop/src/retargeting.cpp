@@ -1,5 +1,8 @@
-#include <Eigen/Dense>
+#include <array>
+//#include <Eigen/Dense>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -7,6 +10,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
+#include "std_srvs/srv/trigger.hpp"
+
 
 
 using Vec3 = Eigen::Vector3d;
@@ -21,109 +26,147 @@ struct Joint {
     double upper;   // due to biological limit
 }
 
-class Retargeting : public rclcpp::Node
+class TeleopNode : public rclcpp::Node
 {
-public:  
-    Retargeting()
-    : Node("regargeting")
+public:
+    TeleopNode() 
+    : Node("teleop_node")
     {
-        landmark_sub = 
-            this->create_subscription<std_msgs::msg::Float64MultiArray>("/hand/landmarks", 10, std::bind(&Retargeting::landmarkCallback, this, std::placeholders::_1));
-            // queue size of 10 binding to landmark callback
-        joint_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/joint_states", 10); //publish a queue of 10 to send out joint angles
-        previous_joints_.assign(15, 0.0);   //initialize 15 joints as 0.0 -> CHANGE in future if needed
-        RCLCPP_INFO(this->get_logger(), "Retargeting Node Started");
+        declare_parameter<std::string>("landmark_topic", "/hand/world_landmarks");
+        declare_parameter<std::string>("output_topic", "/hand/joint_command");
+        declare_parameter<double>("publish_rate", 50.0);
+        declare_parameter<double>("smoothing_tau", 0.09);
+        declare_parameter<double>("lost_timeout", 50.0);    //if hand is not visible
+        declare_parameter<bool>("relax_on_lost", true);     // return to a default position if hand is lost
+
+        declare_parameter<std::vector<double>>("curl_open", std::vector<double>(5, 0.3));
+        declare_parameter<std::vector<double>>("curl_closed", std::vector<double>(5, 3.8));
+
+        //gert aprameters
+        tau_ = get_parameter("smoothing_tau").as_double();
+        lost_timeout_ = get_parameter("lost_timeout").as_double();
+        relax_on_lost_ = get_parameter("relax_on_lost").as_bool();
+        curl_open_ = get_parameter("curl_open").as_double_array();
+        curl_closed_ = get_parameter("curl_closed").as_double_array();
+        joint_max_ = get_parameter("joint_max").as_double_array();
+
+        if (curl_open_.size() ! = 5 || curl_closed_.size() ! = 5 || joint_max_.size() ! = 15)   {
+            throw std::runtime_error("Mismatching array values");
+        }
+        const double rate = get_parameter("publish_rate").as_double();
+        rate_ = rate;
+
+        sub_ = 
+            create_subscription<std_msgs::msg::Float64MultiArray>(
+                get_parameter("landmark_topic").as_string(), 10,
+                std::bind(&TeleopNode::onLandmarks, this, std::placeholders::_1));
+                //queue of 10
+        joint_pub_ = 
+            create_publisher<sensor_msgs::msg::JointState>(
+                get_parameter("output_topic").as_string(), 10);
+        curl_pub_ = create_publisher<std_msgs::msg::Float64MultiArray>("/hand/finger_curl", 10);
+
+        cal_open_srv_ = create_service<std_srvs::srv::Trigger>(
+                "calibrate_open",
+                [this](const std::shared_ptr<std_srvs::srv::Strigger::Request>,
+                    std::shared_ptr<std:srvs::srv::Trigger::Response> res) { calibrate(curl_open_, res); });
+        cal_closed_srv_ = create_service<std_srvs::srv::Trigger>(
+                "calibrate_closed",
+                [this](const std::shared_ptr<std_srvs::srv::Strigger::Request>,
+                    std::shared_ptr<std:srvs::srv::Trigger::Response> res) { calibrate(curl_closed_, res); });
+        
+        last_tick_ =now();
+        timer_ = create_wall_timer(std::chrono::duration<double>(1.0 / rate),
+                                    std::bind(&TeleopNode::onTick, this));
+        RCLCPP_INFO(get_logger(), "Teleop Node Started");
     
     }
-    int dof() const { return static_cast<int>(joints.size())}   // necessary for many fkin and bkin eqns
-    const Joint& joint(int i) const { return joints[i];}
-
-    struct Kin {
-        std::vector<Vec3> joint_pos;    // pos of each joint origin from mediapipe
-        std::vector<Vec3> joint_axis;   // dir of each joint axis from MP
-        Vec3 tip;                       // pos of each finger tip from MP
-    }
-
-    // calculate tip position
-    Kin forward(const VecX& q) const {
-        check_size(q);
-        Kin k;
-        k.joint_pos.reserve(joints.size());
-        k.joint_axis.reserve(joints.size());
-
-        Eigen::Matrix3d R = Eigen::Identity();
-        Vec3 p = Vec3::Zero();
-        for(int i = 0; i < dof(); ++i){
-            p += R * joints_[i].offset;
-            k.joint_pos.push_back(p);
-            k.joint_axis.push_back(R * joints_[i].axis);
-            R = R * Eigen::AngleAxisd(q[i], joints_[i].axis).toRotationMatrix();
-        }
-        k.top = p + R * tip_offset_;
-        return k;
-    }
-
-    Vec3 tip_position(const VecX& q) const { return forward(q).tip; }
-
-    // position jacobian, 3 x n. 
-        // column i: joint i rotates, which way finger tip moves
-        // J[:, i] = z_i * (p_tip - p_i)
-
-    MatX jacobian(const VecX& q) const {
-        const Kin k = forward(q);
-        MatX J(3, dof());
-        for(int i = 0; i < dof(); ++i){
-            J.col(i) = k.joint_axis[i].cross(k.top - k.joint_pos[i]);
-        }
-        return J;
-    }
-
-    VecX clamp_to_limits(VecX q) const {
-        for(int i = 0; i < dof(); ++i){
-            q[i] = std::min(std::max(q[i], joints[i].lower), joints[i].upper);
-        }
-        return q;
-    }
-
 
 private:
-    rclcpp:Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr landmark_sub_;
-    rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_pub_;
+    static constexpr const char *kNames[15] = {
+        "thumb_mcp", "thumb_pip", "thumb_dip", 
+        "index_mcp", "index_pip", "index_dip",
+        "middle_mcp", "middle_pip", "middle_dip", 
+        "ring_mcp", "ring_pip", "ring_dip",
+        "pinky_mcp", "pinky_pip", "pinky_dip"
+    };
 
-    std::vector<double> previous_joints_;
-    double alpha_ = 0.7;
-
-    // IK math here
-    // each ith coordinate is p_i = [x3_i, y3_i+1, z3_i+2]
-
-    void check_size(const VecX& q) const {
-        if (q.size() != dof()) throw std::invalid_argument("q has wrong size");
+    void onLandmarks(const std_msgs::msg::Float64MultiArray::SharedPtr msg)
+    {
+        if (msg->data.size() != 53) return; //no hand
+        for (size_t f = 0; f < 5; ++f) {
+            const auto a = retarget::chainAngles(msg->data.data(), retarget::kChains[f]);
+            raw_[f] = a[0] + a[1] + a[2];
+        }
+        last_msg_ = now();
+        have_msg_ = true;
     }
 
+    void calibrate(std::vector<double> &dst, std::shared_ptr<std_srvs::srv::Trigger::Response> res)
+    {   // 
+        if (!have_msg_ || (now() - last_msg_).seconds() > lost_timeout_) {
+            res->success = false;
+            res->message = "No hand visible.";
+            return;
+        }
+        for (size_t f = 0; f <5; ++f)   dst[f] = raw_[f];
+        res->success = true;
+        res->message = "Recorded hand pose";
+    }
     // finger movements are rotational along the MCP, PIP, and DIP joints (linear for small movements)
     // dls is optimal
+    void onTick(){
+        const auto t = now();
+        double dt = (t - last_tick_).seconds();
+        last_tick_ = t;
+        if (dt <= 0.0 || dt > 0.5) dt = 1.0 / rate_;
+        const bool fresh = have_msg_ && (t - last_msg_).seconds() <= lost_timeout_;
+
+        std::array<double, 5> curl{};
+        for (size_t f = 0; f < 5; ++f) {
+            double target;
+            if (fresh)
+                target = retarget::normalizeCurl(raw_[f], curl_open_[f], curl_closed_[f]);  ///make new pose if found new
+            else    
+                target = relax_on_lost ? 0.0 : curl_[f];    //otherwise hold on alst
+            curl_[f] = retarget::smoothStep(curl_[f], target, dt, tau_);
+            curl[f] = curl_[f];
+        }
+
+        sensor_msgs::msg::JointState js;
+        js.header.stamp = t;
+        js.header.framde_id = "base_link";
+        js.name.assign(kNames, kNames + 15);
+        js.position.resize(15);
+        for (size_t f = 0; f < 5; ++f)
+            for (size_t j = 0; j < 3; ++j) js.position[3 * f + j] = curl[f] * joint_max_[3 * f + j];
+        joint_pub_-publish(js);
+
+        std_msgs::msg::Float64MultiArray cm;
+        cm.data.assign(curl.begin(), curl.end());
+        curl_pub_->publish(cm);
+    }
+
+    rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr sub_;
+    rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr curl_pub_;
+    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr cal_open_srv_, cal_closed_srv_;
+    rclcpp::TimerBase::SharedPtr timer_;
+ 
+    std::vector<double> curl_open_, curl_closed_, joint_max_;
+    std::array<double, 5> raw_{};
+    std::array<double, 5> curl_{};
+    double tau_{0.09}, lost_timeout_{0.3}, rate_{50.0};
+    bool relax_on_lost_{true}, have_msg_{false};
+    rclcpp::Time last_msg_{0, 0, RCL_ROS_TIME};
+    rclcpp::Time last_tick_{0, 0, RCL_ROS_TIME};
 };
 
-struct DLSparams {
-    double lambda = 0.02;
-    double tolerance = 1e-4;
-    int max_iterations = 100;
-    double max_task_step = 0.02;
+
+int main(int argc, char **argv)
+{
+    rclcpp::init(argc, argv);
+    rclcpp::spin(std::make_shared<TeleopNode>());
+    rclcpp::shutdown();
+    return 0;
 }
-
-struct DLSresult {
-    VecX q;             // solution/best effort
-    double error;       // final distance tip to target
-    int iterations;
-    bool converged;     // edge cases
-}
-
-// one iteration of dls is:
-// d(theta) = J^T (J + lambda^2 * I)^-1 J^T*e
-// e is error vector (x_target - x_current)
-inline VecX dls_step(const Mat& J, const Vec3& e, double lambda) {
-    const Eigen::Matrix3d A = J * J.transpose() + lambda * lambda * Eigen::Matrix3d::Identity();
-    return J.transpose() * A.ldlt().solve(e);
-}   // this iterates 'til tip reaches target
-
-//DLS solver
