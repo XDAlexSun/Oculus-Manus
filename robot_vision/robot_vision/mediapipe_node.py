@@ -33,6 +33,9 @@ class MediaPipeNode(Node):
 
         self.mp_draw = mp.solutions.drawing_utils
 
+        cv2.namedWindow("Robot Hand Vision", cv2.WINDOW_NORMAL)
+        cv2.resizeWindow("Robot Hand Vision", 400, 400)
+
         self.timer = self.create_timer(0.03, self.update)
 
         self.get_logger().info('MediaPipe Vision Node Started')
@@ -50,8 +53,8 @@ class MediaPipeNode(Node):
 
         crop_size = int(min(h, w) * 0.6)
 
-        x1 = (w - crop_size)
-        y1 = (h - crop_size)
+        x1 = (w - crop_size) // 2
+        y1 = (h - crop_size) // 2
         x2 = x1 + crop_size
         y2 = y1 + crop_size
 
@@ -80,8 +83,6 @@ class MediaPipeNode(Node):
         self.publisher_.publish(msg)
 
         cv2.imshow("Robot Hand Vision", frame)
-        cv2.resizeWindow("Robot Hand Vision", 400, 400)
-
         cv2.waitKey(1)
 
     def destroy_node(self):

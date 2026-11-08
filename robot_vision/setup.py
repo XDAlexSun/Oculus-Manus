@@ -25,6 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'mediapipe_node = robot_vision.mediapipe_node:main',
+            'mediapipe_world_node = robot_vision.mediapipe_world_node:main',
+            'fake_hand_node = robot_vision.fake_hand_node:main',
         ],
     },
 )

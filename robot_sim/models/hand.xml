@@ -1,0 +1,106 @@
+<mujoco model="teleop_hand">
+  <!-- Minimal 15-joint test hand. Palm faces +z, fingers extend along +y and curl toward +z.
+       Joint names and limits match robot_description/urdf/robot_hand.urdf. Replace with your own model: all that
+       matters is joint names + one position actuator per joint. -->
+  <compiler angle="radian"/>
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+
+  <default>
+    <joint type="hinge" axis="1 0 0" range="0 1.57" damping="0.01" armature="0.0002"/>
+    <!-- contacts off for now so adjacent capsules never fight each other -->
+    <geom type="capsule" size="0.008" contype="0" conaffinity="0" density="1000" rgba="0.85 0.70 0.60 1"/>
+    <position kp="0.6" kv="0.02" ctrllimited="true" ctrlrange="0 1.57"/>
+  </default>
+
+  <worldbody>
+    <light pos="0 0.05 0.6" dir="0 0 -1"/>
+    <geom name="floor" type="plane" size="0.3 0.3 0.01" pos="0 0.05 -0.03" rgba="0.92 0.92 0.92 1"/>
+
+    <body name="palm" pos="0 0 0">
+      <geom name="palm_geom" type="box" size="0.045 0.045 0.01" rgba="0.70 0.55 0.45 1"/>
+
+      <body name="thumb_base" pos="-0.055 0.0 0">
+        <joint name="thumb_mcp" range="0 1.8"/>
+        <geom fromto="0 0 0 0 0.035 0"/>
+        <body pos="0 0.035 0">
+          <joint name="thumb_pip" range="0 1.8"/>
+          <geom fromto="0 0 0 0 0.025 0"/>
+          <body pos="0 0.025 0">
+            <joint name="thumb_dip" range="0 1.8"/>
+            <geom fromto="0 0 0 0 0.020 0"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="index_base" pos="-0.030 0.045 0">
+        <joint name="index_mcp"/>
+        <geom fromto="0 0 0 0 0.040 0"/>
+        <body pos="0 0.040 0">
+          <joint name="index_pip"/>
+          <geom fromto="0 0 0 0 0.025 0"/>
+          <body pos="0 0.025 0">
+            <joint name="index_dip"/>
+            <geom fromto="0 0 0 0 0.020 0"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="middle_base" pos="-0.010 0.045 0">
+        <joint name="middle_mcp"/>
+        <geom fromto="0 0 0 0 0.045 0"/>
+        <body pos="0 0.045 0">
+          <joint name="middle_pip"/>
+          <geom fromto="0 0 0 0 0.028 0"/>
+          <body pos="0 0.028 0">
+            <joint name="middle_dip"/>
+            <geom fromto="0 0 0 0 0.022 0"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="ring_base" pos="0.010 0.045 0">
+        <joint name="ring_mcp"/>
+        <geom fromto="0 0 0 0 0.042 0"/>
+        <body pos="0 0.042 0">
+          <joint name="ring_pip"/>
+          <geom fromto="0 0 0 0 0.026 0"/>
+          <body pos="0 0.026 0">
+            <joint name="ring_dip"/>
+            <geom fromto="0 0 0 0 0.021 0"/>
+          </body>
+        </body>
+      </body>
+
+      <body name="pinky_base" pos="0.030 0.045 0">
+        <joint name="pinky_mcp"/>
+        <geom fromto="0 0 0 0 0.032 0"/>
+        <body pos="0 0.032 0">
+          <joint name="pinky_pip"/>
+          <geom fromto="0 0 0 0 0.020 0"/>
+          <body pos="0 0.020 0">
+            <joint name="pinky_dip"/>
+            <geom fromto="0 0 0 0 0.018 0"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="thumb_mcp_act"  joint="thumb_mcp" ctrlrange="0 1.8"/>
+    <position name="thumb_pip_act"  joint="thumb_pip" ctrlrange="0 1.8"/>
+    <position name="thumb_dip_act"  joint="thumb_dip" ctrlrange="0 1.8"/>
+    <position name="index_mcp_act"  joint="index_mcp"/>
+    <position name="index_pip_act"  joint="index_pip"/>
+    <position name="index_dip_act"  joint="index_dip"/>
+    <position name="middle_mcp_act" joint="middle_mcp"/>
+    <position name="middle_pip_act" joint="middle_pip"/>
+    <position name="middle_dip_act" joint="middle_dip"/>
+    <position name="ring_mcp_act"   joint="ring_mcp"/>
+    <position name="ring_pip_act"   joint="ring_pip"/>
+    <position name="ring_dip_act"   joint="ring_dip"/>
+    <position name="pinky_mcp_act"  joint="pinky_mcp"/>
+    <position name="pinky_pip_act"  joint="pinky_pip"/>
+    <position name="pinky_dip_act"  joint="pinky_dip"/>
+  </actuator>
+</mujoco>

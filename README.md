@@ -51,6 +51,14 @@ ros2 launch robot_bringup display.launch.py
 
 ---
 
+### MuJoCo Mode
+File: `sim.launch.py`
+
+```bash
+ros2 launch robot_bringup sim.launch.py fake:=true   # synthetic hand, no camera
+ros2 launch robot_bringup sim.launch.py              # real webcam
+```
+
 ### Teleoperation Mode (Vision Control)
 File: `teleop.launch.py`
 
@@ -65,7 +73,14 @@ Launches:
 
 Run:
 ```bash
+ros2 launch robot_bringup teleop.launch.py fake:=true   # no camera needed
 ros2 launch robot_bringup teleop.launch.py
+```
+
+Calibrate once with your hand open, then in a fist:
+```bash
+ros2 service call /calibrate_open std_srvs/srv/Trigger
+ros2 service call /calibrate_closed std_srvs/srv/Trigger
 ```
 
 ---
@@ -86,8 +101,9 @@ Features:
 
 ### 1. Clone repository
 ```bash
-git clone https://github.com/kimsniper/ros2_vision_hand_teleop.git
-cd ros2_vision_hand_teleop
+mkdir -p ~/ws/src && cd ~/ws/src
+git clone https://github.com/XDAlexSun/Oculus-Manus.git
+cd ~/ws
 ```
 
 ### 2. Install dependencies
@@ -99,7 +115,7 @@ sudo apt install ros-$ROS_DISTRO-rviz2 \
 
 Python dependencies:
 ```bash
-pip install mediapipe opencv-python numpy
+pip install mediapipe opencv-python numpy mujoco
 ```
 
 ### 3. Build workspace
@@ -118,8 +134,11 @@ source install/setup.bash
 
 | Topic | Type | Description |
 |------|------|-------------|
-| /hand/landmarks | Float64MultiArray | MediaPipe hand landmarks |
-| /joint_states | JointState | Robot joint commands |
+| /hand/world_landmarks | Float64MultiArray | 21 metric landmarks (63 floats); empty = no hand |
+| /hand/finger_curl | Float64MultiArray | 5 curl values, 0 (open) to 1 (closed) |
+| /hand/joint_command | JointState | 15 target joint angles for MuJoCo |
+| /joint_states | JointState | same angles, used in RViz mode (robot_state_publisher) |
+| /hand/sim_joint_states | JointState | angles the MuJoCo simulation actually reached |
 
 ---
 
@@ -128,6 +147,7 @@ source install/setup.bash
 robot_bringup - Launch files  
 robot_control - Control logic  
 robot_description - URDF, RViz config  
+robot_sim - MuJoCo bridge and node  
 robot_teleop - Landmark, joint mapping  
 robot_vision - MediaPipe vision node  
 

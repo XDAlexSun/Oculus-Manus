@@ -12,9 +12,9 @@ from std_msgs.msg import Float64MultiArray
 class MediaPipeNode(Node):
 
     def __init__(self):
-        super().__init__('mediapipe_node')
+        super().__init__('mediapipe_world_node')
 
-        self.publisher_ = self.create_publisher(Float64MultiArray, '/hand/landmarks', 10)
+        self.publisher_ = self.create_publisher(Float64MultiArray, '/hand/world_landmarks', 10)
 
         self.cap = cv2.VideoCapture(0)
 
@@ -51,8 +51,8 @@ class MediaPipeNode(Node):
         h, w, _ = frame.shape
         crop_size = int(min(h, w) * 0.6)
 
-        x1 = w - crop_size
-        y1 = h - crop_size
+        x1 = (w - crop_size) // 2
+        y1 = (h - crop_size) // 2
         x2 = x1 + crop_size
         y2 = y1 + crop_size
 
